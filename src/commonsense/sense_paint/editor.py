@@ -322,6 +322,11 @@ class EditorApp:
         self.root.configure(bg=THEME["bg"])
         self.root.geometry("1100x680+30+10")
         self.root.minsize(1000, 640)
+        # Force Tk to reflow geometry when the WM resizes/maximizes the window.
+        # Without this, Tk on some Linux WMs keeps the content at its original
+        # size even after the X11 frame grows — the maximized window has empty
+        # bands where content should have expanded.
+        self.root.bind("<Configure>", self._on_root_configure)
         # Track last animation source so we can detach a player on close.
         self._last_anim_path: Optional[str] = None
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1219,6 +1224,20 @@ class EditorApp:
             self.toast.show(f"📂 Loaded {name} — {len(self.model.frames)} frame(s)")
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
+
+    def _on_root_configure(self, event) -> None:  # type: ignore[no-untyped-def]
+        """Force layout recompute when the WM resizes the window.
+
+        Tk on some Linux WMs (notably LXDE/Openbox) doesn't propagate WM-driven
+        resizes (e.g. clicking the maximize button) into the geometry manager.
+        The X11 frame grows, but pack/grid keeps children at their original
+        size, leaving empty bands. Calling update_idletasks on root re-runs
+        the geometry computation and the children fill the new space."""
+        if event.widget is self.root:
+            try:
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
 
     def _on_close(self) -> None:
         """If the editor is shutting down with hardware preview enabled and an
