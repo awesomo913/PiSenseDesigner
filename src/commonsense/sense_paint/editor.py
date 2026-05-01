@@ -586,40 +586,36 @@ class EditorApp:
         # RIGHT — tools + stamps (already-packed slot from above)
         right = self._right_panel
 
+        # Pack everything directly into right (no sub-frames) — sub-frames
+        # were collapsing at large window sizes and hiding their children.
         tk.Label(right, text="TOOLS", font=("Segoe UI", 12, "bold"),
-                 bg=THEME["bg"], fg=THEME["accent"]).pack(anchor=tk.W)
-        tools_box = tk.Frame(right, bg=THEME["bg"])
-        tools_box.pack(fill=tk.X, pady=(2, 8))
+                 bg=THEME["bg"], fg=THEME["accent"]).pack(anchor=tk.W, fill=tk.X)
         for key, label in [
             (TOOL_PENCIL, "✏️  Pencil"),
             (TOOL_ERASER, "🧹  Eraser"),
             (TOOL_BUCKET, "🪣  Bucket"),
             (TOOL_PICKER, "💧  Pick color"),
         ]:
-            b = self._btn(tools_box, label, lambda k=key: self._set_tool(k),
+            b = self._btn(right, label, lambda k=key: self._set_tool(k),
                           font_size=11, pady=8, padx=10)
-            b.pack(fill=tk.X, pady=2)
+            b.pack(fill=tk.X, pady=2, padx=2)
             self.tool_buttons[key] = b
 
         tk.Label(right, text="QUICK ACTIONS", font=("Segoe UI", 12, "bold"),
-                 bg=THEME["bg"], fg=THEME["accent_warm"]).pack(anchor=tk.W, pady=(6, 2))
-        actions = tk.Frame(right, bg=THEME["bg"])
-        actions.pack(fill=tk.X, pady=(0, 8))
-        self._btn(actions, "✂️  Clear",     self._clear_frame,        font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "🎨  Fill all",  self._fill_frame,         font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "↔  Mirror",    lambda: self._mirror("h"), font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "↕  Flip",      lambda: self._mirror("v"), font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "🌀  Rotate",   self._rotate_frame,        font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "🌈  Random",   self._random_frame,        font_size=10).pack(fill=tk.X, pady=2)
-        self._btn(actions, "↩️  Undo",     self._undo,                bg=THEME["accent_yel"], fg="#0a0a0a",
-                  font_size=11, pady=8).pack(fill=tk.X, pady=2)
+                 bg=THEME["bg"], fg=THEME["accent_warm"]).pack(anchor=tk.W, pady=(8, 2), fill=tk.X)
+        self._btn(right, "✂️  Clear",     self._clear_frame,        font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "🎨  Fill all",  self._fill_frame,         font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "↔  Mirror",    lambda: self._mirror("h"), font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "↕  Flip",      lambda: self._mirror("v"), font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "🌀  Rotate",   self._rotate_frame,        font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "🌈  Random",   self._random_frame,        font_size=10).pack(fill=tk.X, pady=2, padx=2)
+        self._btn(right, "↩️  Undo",     self._undo,                bg=THEME["accent_yel"], fg="#0a0a0a",
+                  font_size=11, pady=8).pack(fill=tk.X, pady=2, padx=2)
 
         tk.Label(right, text="HARDWARE", font=("Segoe UI", 12, "bold"),
-                 bg=THEME["bg"], fg=THEME["accent_pur"]).pack(anchor=tk.W, pady=(6, 2))
-        hw = tk.Frame(right, bg=THEME["bg"])
-        hw.pack(fill=tk.X)
-        ttk.Checkbutton(hw, text="Live LED preview" + ("" if self.sense else " (no HAT)"),
-                        variable=self.hardware_preview).pack(anchor=tk.W)
+                 bg=THEME["bg"], fg=THEME["accent_pur"]).pack(anchor=tk.W, pady=(8, 2), fill=tk.X)
+        ttk.Checkbutton(right, text="Live LED preview" + ("" if self.sense else " (no HAT)"),
+                        variable=self.hardware_preview).pack(anchor=tk.W, padx=2)
 
         # ── bottom strip: stamps library button + sensor frames ────────
         bottom = self._bottom_strip
