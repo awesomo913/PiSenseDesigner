@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CommonSense
+GenericName=Sense HAT Paint
+Comment=8x8 LED animation editor for Sense HAT
+Exec=__HOME__/CommonSense/run.sh
+Icon=preferences-desktop-display
+Terminal=false
+Categories=Graphics;Education;Development;
+StartupNotify=true
+Keywords=led;sensehat;animation;pixel;art;
