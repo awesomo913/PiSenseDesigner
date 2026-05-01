@@ -321,6 +321,9 @@ class EditorApp:
         self.root.title("CommonSense — Sense HAT Paint")
         self.root.configure(bg=THEME["bg"])
         self.root.geometry("1100x680+30+10")
+        # Disable resize/fullscreen — layout breaks on huge windows.
+        # User can still drag the window around; just can't resize it.
+        self.root.resizable(False, False)
         try:
             self.root.tk.call("tk", "scaling", 1.2)
         except tk.TclError:
