@@ -321,9 +321,10 @@ class EditorApp:
         self.root.title("CommonSense — Sense HAT Paint")
         self.root.configure(bg=THEME["bg"])
         self.root.geometry("1100x680+30+10")
-        # Disable resize/fullscreen — layout breaks on huge windows.
-        # User can still drag the window around; just can't resize it.
-        self.root.resizable(False, False)
+        self.root.minsize(1000, 640)
+        # Track last animation source so we can detach a player on close.
+        self._last_anim_path: Optional[str] = None
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         try:
             self.root.tk.call("tk", "scaling", 1.2)
         except tk.TclError:
@@ -483,17 +484,16 @@ class EditorApp:
         self._bottom_strip = tk.Frame(self.root, bg=THEME["panel_alt"], pady=8)
         self._bottom_strip.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # ── main 3-column layout (grid w/ weights — handles maximize) ──
+        # ── main 3-column layout — pack with side ordering survives resize ──
+        # Order matters: pack LEFT and RIGHT first (fixed widths), then CENTER
+        # with expand=True absorbs all extra space. Survives fullscreen.
         main = tk.Frame(self.root, bg=THEME["bg"])
         main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=8)
-        main.columnconfigure(0, weight=0, minsize=160)
-        main.columnconfigure(1, weight=1)
-        main.columnconfigure(2, weight=0, minsize=200)
-        main.rowconfigure(0, weight=1)
 
-        # LEFT — palette
-        left = tk.Frame(main, bg=THEME["bg"], padx=4)
-        left.grid(row=0, column=0, sticky="ns")
+        # LEFT — palette (fixed width)
+        left = tk.Frame(main, bg=THEME["bg"], padx=4, width=160)
+        left.pack(side=tk.LEFT, fill=tk.Y)
+        left.pack_propagate(False)
         tk.Label(left, text="PAINT BOX", font=("Segoe UI", 12, "bold"),
                  bg=THEME["bg"], fg=THEME["accent"]).pack(anchor=tk.W)
         tk.Label(left, text="(press 1-9, 0)", font=("Segoe UI", 9),
@@ -501,9 +501,15 @@ class EditorApp:
         self.palette_container = tk.Frame(left, bg=THEME["bg"])
         self.palette_container.pack(fill=tk.Y)
 
-        # CENTER — canvas grid + frame controls + thumbnails
+        # RIGHT panel placeholder — pack to RIGHT FIRST so center can expand
+        # We attach contents later; reserve the slot now.
+        self._right_panel = tk.Frame(main, bg=THEME["bg"], padx=4, width=210)
+        self._right_panel.pack(side=tk.RIGHT, fill=tk.Y)
+        self._right_panel.pack_propagate(False)
+
+        # CENTER — canvas grid + frame controls + thumbnails (expands)
         center = tk.Frame(main, bg=THEME["bg"], padx=10)
-        center.grid(row=0, column=1, sticky="nsew")
+        center.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.grid_canvas = tk.Canvas(
             center, width=GRID_PX + 4, height=GRID_PX + 4,
@@ -574,9 +580,8 @@ class EditorApp:
         self.thumb_strip = tk.Frame(self.thumb_outer, bg=THEME["panel"])
         self.thumb_strip.pack(side=tk.LEFT, padx=8)
 
-        # RIGHT — tools + stamps
-        right = tk.Frame(main, bg=THEME["bg"], padx=4)
-        right.grid(row=0, column=2, sticky="ns")
+        # RIGHT — tools + stamps (already-packed slot from above)
+        right = self._right_panel
 
         tk.Label(right, text="TOOLS", font=("Segoe UI", 12, "bold"),
                  bg=THEME["bg"], fg=THEME["accent"]).pack(anchor=tk.W)
@@ -1209,11 +1214,45 @@ class EditorApp:
             self.selected_color = min(self.selected_color, len(self.model.palette) - 1)
             self._undo_stack.clear()
             self._last_palette_signature = None
+            self._last_anim_path = os.path.abspath(path)
             self._render_all()
             name = os.path.basename(path)
             self.toast.show(f"📂 Loaded {name} — {len(self.model.frames)} frame(s)")
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
+
+    def _on_close(self) -> None:
+        """If the editor is shutting down with hardware preview enabled and an
+        animation loaded, spawn a detached player so the LED matrix keeps
+        playing the last animation after the GUI exits."""
+        try:
+            should_detach = (
+                self.sense is not None
+                and bool(self.hardware_preview.get())
+                and self._last_anim_path
+                and os.path.exists(self._last_anim_path)
+            )
+        except Exception:
+            should_detach = False
+        if should_detach:
+            try:
+                import subprocess, sys
+                # Use the same Python the editor is running under.
+                subprocess.Popen(
+                    [sys.executable, "-m", "commonsense.sense_paint.play_anim",
+                     self._last_anim_path],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                pass
+        # Now tear down Tk
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def _load_example(self, name: str) -> None:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -1424,13 +1463,12 @@ class EditorApp:
                     fill="#000000", outline="",
                 )
 
-        idx_box = [0]
+        # State: index + currently-scheduled job ID. Animation plays only
+        # while the cursor is over this preview — keeps Pi from melting under
+        # 400 concurrent looping previews at library open.
+        state = {"idx": 0, "job": None}
 
-        def _draw_frame() -> None:
-            i = idx_box[0]
-            if i >= len(frames_data):
-                i = 0
-                idx_box[0] = 0
+        def _draw_frame(i: int) -> None:
             pixels = frames_data[i]
             for y in range(GRID):
                 for x in range(GRID):
@@ -1438,22 +1476,35 @@ class EditorApp:
                     if 0 <= pi < len(palette):
                         cv.itemconfigure(rects[y][x], fill=_hex(palette[pi]))
 
+        # Static initial frame.
+        _draw_frame(0)
+
         def _tick() -> None:
             try:
-                _draw_frame()
-                idx_box[0] = (idx_box[0] + 1) % len(frames_data)
-                job = parent_win.after(delay, _tick)
-                anim_jobs.append(job)
+                _draw_frame(state["idx"])
+                state["idx"] = (state["idx"] + 1) % len(frames_data)
+                state["job"] = parent_win.after(delay, _tick)
+                if state["job"] is not None:
+                    anim_jobs.append(state["job"])
             except tk.TclError:
-                pass
+                state["job"] = None
 
-        _tick()
-
-        # Hover effects + click-to-load
+        # Hover starts animation; leave stops + resets to frame 0.
         def _enter(_e):
             cv.configure(highlightbackground=THEME["accent_yel"], highlightthickness=3)
+            if state["job"] is None:
+                state["idx"] = 0
+                _tick()
         def _leave(_e):
             cv.configure(highlightbackground=THEME["panel"], highlightthickness=2)
+            j = state["job"]
+            if j is not None:
+                try:
+                    parent_win.after_cancel(j)
+                except tk.TclError:
+                    pass
+                state["job"] = None
+            _draw_frame(0)
         cv.bind("<Enter>", _enter)
         cv.bind("<Leave>", _leave)
 
