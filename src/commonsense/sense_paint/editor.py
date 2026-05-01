@@ -320,13 +320,15 @@ class EditorApp:
         self.root = tk.Tk()
         self.root.title("CommonSense — Sense HAT Paint")
         self.root.configure(bg=THEME["bg"])
-        self.root.geometry("1100x680+30+10")
+        self.root.geometry("1280x800+20+10")
         self.root.minsize(1000, 640)
-        # Force Tk to reflow geometry when the WM resizes/maximizes the window.
-        # Without this, Tk on some Linux WMs keeps the content at its original
-        # size even after the X11 frame grows — the maximized window has empty
-        # bands where content should have expanded.
-        self.root.bind("<Configure>", self._on_root_configure)
+        # Tk on LXDE/Openbox has a long-standing bug where a WM-driven maximize
+        # leaves child widgets at their original size — many buttons disappear.
+        # F11 toggles X11 fullscreen instead, which uses a separate code path
+        # that reliably reflows the layout. Block the maximize button.
+        self._is_fullscreen = False
+        self.root.bind("<F11>", self._toggle_fullscreen)
+        self.root.bind("<Escape>", lambda e: self._set_fullscreen(False))
         # Track last animation source so we can detach a player on close.
         self._last_anim_path: Optional[str] = None
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1225,19 +1227,15 @@ class EditorApp:
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
 
-    def _on_root_configure(self, event) -> None:  # type: ignore[no-untyped-def]
-        """Force layout recompute when the WM resizes the window.
+    def _toggle_fullscreen(self, _event=None) -> None:
+        self._set_fullscreen(not self._is_fullscreen)
 
-        Tk on some Linux WMs (notably LXDE/Openbox) doesn't propagate WM-driven
-        resizes (e.g. clicking the maximize button) into the geometry manager.
-        The X11 frame grows, but pack/grid keeps children at their original
-        size, leaving empty bands. Calling update_idletasks on root re-runs
-        the geometry computation and the children fill the new space."""
-        if event.widget is self.root:
-            try:
-                self.root.update_idletasks()
-            except tk.TclError:
-                pass
+    def _set_fullscreen(self, on: bool) -> None:
+        try:
+            self.root.attributes("-fullscreen", bool(on))
+            self._is_fullscreen = bool(on)
+        except tk.TclError:
+            pass
 
     def _on_close(self) -> None:
         """If the editor is shutting down with hardware preview enabled and an
