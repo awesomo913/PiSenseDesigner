@@ -130,6 +130,17 @@ class SpeechBubble:
         x, y = self._anchor_pos(target_bbox, req_w, req_h)
         win.geometry(f"{req_w}x{req_h}+{x}+{y}")
 
+        # Force the bubble above the spotlight strips. On LXDE/Openbox,
+        # `-topmost True` alone is not enough when multiple toplevels claim
+        # it — the bubble can land behind the strips. `lift()` puts it at the
+        # top of the stacking order; calling it after geometry ensures the WM
+        # has the final size before raising.
+        try:
+            win.lift()
+            win.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+
         win.bind("<Return>", lambda _e: on_button())
         win.bind("<Escape>", lambda _e: on_skip())
 
