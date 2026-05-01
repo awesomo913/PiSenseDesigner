@@ -484,32 +484,35 @@ class EditorApp:
         self._bottom_strip = tk.Frame(self.root, bg=THEME["panel_alt"], pady=8)
         self._bottom_strip.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # ── main 3-column layout — pack with side ordering survives resize ──
-        # Order matters: pack LEFT and RIGHT first (fixed widths), then CENTER
-        # with expand=True absorbs all extra space. Survives fullscreen.
+        # ── main 3-column layout — grid with weights survives fullscreen ──
+        # Columns: 0=left(160 fixed), 1=center(grows), 2=right(210 fixed).
+        # sticky "nsw"/"nse" anchor the side columns; center is "nsew" so it
+        # absorbs all extra horizontal+vertical space.
         main = tk.Frame(self.root, bg=THEME["bg"])
         main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=8)
 
-        # LEFT — palette (fixed width)
-        left = tk.Frame(main, bg=THEME["bg"], padx=4, width=160)
-        left.pack(side=tk.LEFT, fill=tk.Y)
-        left.pack_propagate(False)
+        main.grid_rowconfigure(0, weight=1)
+        main.grid_columnconfigure(0, minsize=160, weight=0)
+        main.grid_columnconfigure(1, weight=1)
+        main.grid_columnconfigure(2, minsize=210, weight=0)
+
+        # LEFT — palette
+        left = tk.Frame(main, bg=THEME["bg"], padx=4)
+        left.grid(row=0, column=0, sticky="nsw")
         tk.Label(left, text="PAINT BOX", font=("Segoe UI", 12, "bold"),
                  bg=THEME["bg"], fg=THEME["accent"]).pack(anchor=tk.W)
         tk.Label(left, text="(press 1-9, 0)", font=("Segoe UI", 9),
                  bg=THEME["bg"], fg=THEME["text_dim"]).pack(anchor=tk.W, pady=(0, 6))
         self.palette_container = tk.Frame(left, bg=THEME["bg"])
-        self.palette_container.pack(fill=tk.Y)
-
-        # RIGHT panel placeholder — pack to RIGHT FIRST so center can expand
-        # We attach contents later; reserve the slot now.
-        self._right_panel = tk.Frame(main, bg=THEME["bg"], padx=4, width=210)
-        self._right_panel.pack(side=tk.RIGHT, fill=tk.Y)
-        self._right_panel.pack_propagate(False)
+        self.palette_container.pack(fill=tk.Y, anchor=tk.N)
 
         # CENTER — canvas grid + frame controls + thumbnails (expands)
         center = tk.Frame(main, bg=THEME["bg"], padx=10)
-        center.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        center.grid(row=0, column=1, sticky="nsew")
+
+        # RIGHT — tools/quick actions/hardware (fixed width, top-anchored)
+        self._right_panel = tk.Frame(main, bg=THEME["bg"], padx=4)
+        self._right_panel.grid(row=0, column=2, sticky="nse")
 
         self.grid_canvas = tk.Canvas(
             center, width=GRID_PX + 4, height=GRID_PX + 4,
