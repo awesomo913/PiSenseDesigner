@@ -128,6 +128,11 @@ class SpeechBubble:
         req_w = max(BUBBLE_MIN_W, min(win.winfo_reqwidth(), BUBBLE_MAX_W))
         req_h = win.winfo_reqheight()
         x, y = self._anchor_pos(target_bbox, req_w, req_h)
+        import sys
+        print(f"[bubble] target={target_bbox} root=({self.root.winfo_rootx()},"
+              f"{self.root.winfo_rooty()},{self.root.winfo_width()}x"
+              f"{self.root.winfo_height()}) bubble={req_w}x{req_h} "
+              f"placed=({x},{y})", file=sys.stderr)
         win.geometry(f"{req_w}x{req_h}+{x}+{y}")
 
         # Force the bubble above the spotlight strips. On LXDE/Openbox,
