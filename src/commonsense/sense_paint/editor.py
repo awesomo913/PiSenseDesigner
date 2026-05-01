@@ -391,7 +391,11 @@ class EditorApp:
                  bg=THEME["bg"], fg=THEME["text_dim"]).pack(anchor=tk.W, pady=(0, 6))
         self.palette_container = tk.Frame(left, bg=THEME["bg"])
         self.palette_container.pack(fill=tk.Y, anchor=tk.N)
-        self.widget_registry.register("palette", self.palette_container)
+        # Register the WIDER outer frame as "palette" — the inner container is
+        # only ~70px wide and the spotlight hole was too narrow, leaving the
+        # bubble's anchor logic squeezed against the column. The outer `left`
+        # frame is the full PAINT BOX visual cluster the kid recognizes.
+        self.widget_registry.register("palette", left)
 
         # CENTER — canvas grid + frame controls + thumbnails (expands)
         center = tk.Frame(main, bg=THEME["bg"], padx=10)

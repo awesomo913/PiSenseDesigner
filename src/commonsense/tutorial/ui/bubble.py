@@ -205,4 +205,43 @@ class SpeechBubble:
         # Clamp to root bounds — never let the bubble drift off-screen.
         x = max(rx, min(x, rx + rw - bubble_w))
         y = max(ry, min(y, ry + rh - bubble_h))
+
+        # Final overlap check — if clamping pulled the bubble back over the
+        # target (small root, large bubble), shove it to whichever side does
+        # not collide. Without this, the bubble can cover the very widget the
+        # kid needs to click.
+        if self._overlaps((x, y, bubble_w, bubble_h), target_bbox):
+            x, y = self._force_no_overlap(
+                (rx, ry, rw, rh), target_bbox, bubble_w, bubble_h
+            )
         return (x, y)
+
+    @staticmethod
+    def _overlaps(a: BBox, b: BBox) -> bool:
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        return not (
+            ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay
+        )
+
+    @staticmethod
+    def _force_no_overlap(
+        root: BBox, target: BBox, bw: int, bh: int
+    ) -> Tuple[int, int]:
+        rx, ry, rw, rh = root
+        tx, ty, tw, th = target
+        # Try the 4 cardinal positions hugging root edges, prefer the side
+        # that maximizes clear distance from the target.
+        candidates = [
+            (rx + rw - bw, ry + (rh - bh) // 2),                # right edge
+            (rx,           ry + (rh - bh) // 2),                # left edge
+            (rx + (rw - bw) // 2, ry + rh - bh),                # bottom edge
+            (rx + (rw - bw) // 2, ry),                          # top edge
+        ]
+        for cx, cy in candidates:
+            if not SpeechBubble._overlaps((cx, cy, bw, bh), target):
+                # Clamp to root in case rounding pushed off-screen by 1px.
+                return (max(rx, min(cx, rx + rw - bw)),
+                        max(ry, min(cy, ry + rh - bh)))
+        # Fallback — nothing clean fits; centre and accept the overlap.
+        return (rx + (rw - bw) // 2, ry + (rh - bh) // 2)
