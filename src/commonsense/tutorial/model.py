@@ -6,9 +6,14 @@ gates be unit-tested headless.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Set
+
+
+def _utcnow_iso() -> str:
+    """Timezone-aware UTC ISO-8601 string. Avoids the deprecated utcnow()."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 class GateName(str, Enum):
@@ -102,7 +107,7 @@ class Profile:
         return cls(
             name=name,
             age_preset=age_preset,
-            created_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            created_at=_utcnow_iso(),
         )
 
 
@@ -145,9 +150,7 @@ class TutorialState:
 
     @classmethod
     def fresh(cls) -> "TutorialState":
-        return cls(
-            started_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        )
+        return cls(started_at=_utcnow_iso())
 
     def mark_completed(self, step_id: str) -> None:
         self.completed_step_ids.add(step_id)

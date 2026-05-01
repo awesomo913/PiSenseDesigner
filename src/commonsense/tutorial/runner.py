@@ -22,12 +22,11 @@ call across threads.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Callable, List, Optional
 
 from .events import EventBus
 from .gates import gate_for
-from .model import Step, TutorialState
+from .model import Step, TutorialState, _utcnow_iso
 
 StepHandler = Callable[[Step], None]
 RewardHandler = Callable[[Step], None]
@@ -185,7 +184,7 @@ class TutorialRunner:
 
 # ── module helpers ───────────────────────────────────────────────────────────
 def _utcnow() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return _utcnow_iso()
 
 
 def _safe(fn, *args) -> None:
