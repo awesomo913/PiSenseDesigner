@@ -17,8 +17,17 @@ from commonsense.sense_paint.model import (
     Frame,
 )
 from commonsense.sense_paint.stamps_data import ALL_CATEGORIES, total_count
-from commonsense.tutorial import EventBus
+from commonsense.tutorial import (
+    EventBus,
+    TutorialRunner,
+    load_profile,
+    load_state,
+    save_profile,
+    save_state,
+)
+from commonsense.tutorial.content import steps_for
 from commonsense.tutorial.legacy import TutorialWizard
+from commonsense.tutorial.ui import TutorialController, WidgetRegistry
 
 try:
     from sense_hat import SenseHat  # type: ignore
@@ -210,11 +219,17 @@ class EditorApp:
         )
 
         self.toast = Toast(self.root)
-        # EventBus is the editor → tutorial signal channel. Even with the
-        # legacy modal tutorial active, we emit on the bus so Phase 2's
-        # action-gated tutorial drops in with no editor changes.
+        # EventBus is the editor → tutorial signal channel.
         self.events = EventBus()
-        self.tutorial = TutorialWizard(self.root, THEME)
+        # Named-widget registry — populated during _build_ui below. Tutorial
+        # steps reference widgets by name; registry resolves at render time.
+        self.widget_registry = WidgetRegistry()
+        # Legacy fallback (still wired to Help menu so users can pick old style).
+        self._legacy_tutorial = TutorialWizard(self.root, THEME)
+        # Phase 2 tutorial — controller built after _build_ui registers widgets.
+        self._tutorial_controller: Optional["TutorialController"] = None
+        self._profile = load_profile()
+        self._tutorial_state = load_state()
 
         # Widget refs filled by _build_ui
         self.cell_rects: List[List[int]] = [[0] * GRID for _ in range(GRID)]
@@ -232,9 +247,12 @@ class EditorApp:
         self._schedule_tick()
         self._joystick_poll()
         self._bind_hotkeys()
+        self._build_tutorial_controller()
 
-        # Auto-start tutorial first time
-        self.root.after(400, self.tutorial.start)
+        # Auto-start tutorial only if not already finished. Use after() so the
+        # window is mapped before the spotlight measures widget positions.
+        if not self._tutorial_state.completed_at:
+            self.root.after(600, self._start_tutorial)
 
     # ── styling ─────────────────────────────────────────────────────────────
     def _setup_styles(self) -> None:
@@ -294,7 +312,8 @@ class EditorApp:
         i.add_command(label="📡 Sensor → Frame…",                  command=self._open_sensors)
 
         h = tk.Menu(mb, tearoff=0); mb.add_cascade(label="Help", menu=h)
-        h.add_command(label="🎓 Tutorial — walk me through it!", command=self.tutorial.start)
+        h.add_command(label="🎓 Tutorial — walk me through it!", command=self._replay_tutorial)
+        h.add_command(label="📜 Tutorial (classic)",              command=self._legacy_tutorial.start)
         h.add_command(label="💡 Tips & Tricks",                   command=self._show_tips)
         h.add_command(label="Hotkeys",                            command=self._show_hotkeys)
         h.add_command(label="About",                              command=self._show_about)
@@ -319,16 +338,24 @@ class EditorApp:
         )
         sub.pack(side=tk.LEFT, padx=(8, 24))
 
-        self._btn(topbar, "🆕  NEW",   self._new_animation,
-                  bg=THEME["accent_pur"], fg="#1a1a1a", font_size=13, pady=8, padx=16).pack(side=tk.LEFT, padx=4)
-        self._btn(topbar, "📂  OPEN",  self._load_json,
-                  bg=THEME["accent"], fg="#0a0a0a", font_size=13, pady=8, padx=16).pack(side=tk.LEFT, padx=4)
-        self._btn(topbar, "💾  SAVE",  self._quick_save,
-                  bg=THEME["accent_grn"], fg="#0a0a0a", font_size=13, pady=8, padx=16).pack(side=tk.LEFT, padx=4)
-        self._btn(topbar, "🎓  TUTORIAL", self.tutorial.start,
-                  bg=THEME["accent_yel"], fg="#0a0a0a", font_size=13, pady=8, padx=16).pack(side=tk.LEFT, padx=4)
-        self._btn(topbar, "🎬  ANIMATIONS", self._open_animations_library,
-                  bg=THEME["accent_warm"], fg="#0a0a0a", font_size=13, pady=8, padx=16).pack(side=tk.LEFT, padx=4)
+        new_btn = self._btn(topbar, "🆕  NEW",   self._new_animation,
+                  bg=THEME["accent_pur"], fg="#1a1a1a", font_size=13, pady=8, padx=16)
+        new_btn.pack(side=tk.LEFT, padx=4)
+        open_btn = self._btn(topbar, "📂  OPEN",  self._load_json,
+                  bg=THEME["accent"], fg="#0a0a0a", font_size=13, pady=8, padx=16)
+        open_btn.pack(side=tk.LEFT, padx=4)
+        save_btn = self._btn(topbar, "💾  SAVE",  self._quick_save,
+                  bg=THEME["accent_grn"], fg="#0a0a0a", font_size=13, pady=8, padx=16)
+        save_btn.pack(side=tk.LEFT, padx=4)
+        tut_btn = self._btn(topbar, "🎓  TUTORIAL", self._replay_tutorial,
+                  bg=THEME["accent_yel"], fg="#0a0a0a", font_size=13, pady=8, padx=16)
+        tut_btn.pack(side=tk.LEFT, padx=4)
+        anim_btn = self._btn(topbar, "🎬  ANIMATIONS", self._open_animations_library,
+                  bg=THEME["accent_warm"], fg="#0a0a0a", font_size=13, pady=8, padx=16)
+        anim_btn.pack(side=tk.LEFT, padx=4)
+        # Register widgets the tutorial spotlight needs to point at.
+        self.widget_registry.register("save_btn", save_btn)
+        self.widget_registry.register("anim_btn", anim_btn)
 
         # ── status banner ───────────────────────────
         self.status_var = tk.StringVar(value="Ready! Click TUTORIAL up there ☝ for a walkthrough.")
@@ -364,6 +391,7 @@ class EditorApp:
                  bg=THEME["bg"], fg=THEME["text_dim"]).pack(anchor=tk.W, pady=(0, 6))
         self.palette_container = tk.Frame(left, bg=THEME["bg"])
         self.palette_container.pack(fill=tk.Y, anchor=tk.N)
+        self.widget_registry.register("palette", self.palette_container)
 
         # CENTER — canvas grid + frame controls + thumbnails (expands)
         center = tk.Frame(main, bg=THEME["bg"], padx=10)
@@ -372,6 +400,7 @@ class EditorApp:
         # RIGHT — tools/quick actions/hardware (fixed width, top-anchored)
         self._right_panel = tk.Frame(main, bg=THEME["bg"], padx=4)
         self._right_panel.grid(row=0, column=2, sticky="nse")
+        self.widget_registry.register("tools", self._right_panel)
 
         self.grid_canvas = tk.Canvas(
             center, width=GRID_PX + 4, height=GRID_PX + 4,
@@ -379,6 +408,7 @@ class EditorApp:
             highlightbackground=THEME["accent"],
         )
         self.grid_canvas.pack(pady=(2, 8))
+        self.widget_registry.register("canvas", self.grid_canvas)
         for y in range(GRID):
             for x in range(GRID):
                 self.cell_rects[y][x] = self.grid_canvas.create_rectangle(
@@ -399,13 +429,16 @@ class EditorApp:
             bg=THEME["accent_grn"], fg="#0a0a0a", font_size=18, pady=14, padx=28,
         )
         self.play_btn.pack(side=tk.LEFT, padx=8)
+        self.widget_registry.register("play_btn", self.play_btn)
 
         nav_grid = tk.Frame(ctrl_row, bg=THEME["bg"])
         nav_grid.pack(side=tk.LEFT, padx=8)
         self._btn(nav_grid, "◀ Prev",  self._prev_frame, font_size=11, pady=6, padx=10).grid(row=0, column=0, padx=2, pady=2)
         self._btn(nav_grid, "Next ▶",  self._next_frame, font_size=11, pady=6, padx=10).grid(row=0, column=1, padx=2, pady=2)
-        self._btn(nav_grid, "➕ Add",  self._add_frame,  bg=THEME["accent"], fg="#0a0a0a",
-                  font_size=11, pady=6, padx=10).grid(row=1, column=0, padx=2, pady=2)
+        add_btn = self._btn(nav_grid, "➕ Add",  self._add_frame,  bg=THEME["accent"], fg="#0a0a0a",
+                  font_size=11, pady=6, padx=10)
+        add_btn.grid(row=1, column=0, padx=2, pady=2)
+        self.widget_registry.register("add_btn", add_btn)
         self._btn(nav_grid, "📋 Copy", self._copy_frame, font_size=11, pady=6, padx=10).grid(row=1, column=1, padx=2, pady=2)
         self._btn(nav_grid, "❌ Del",  self._del_frame,  bg=THEME["accent_warm"], fg="#0a0a0a",
                   font_size=11, pady=6, padx=10).grid(row=2, column=0, columnspan=2, padx=2, pady=2, sticky="ew")
@@ -503,6 +536,28 @@ class EditorApp:
         self.root.bind_all("<Control-o>", lambda e: self._load_json())
         self.root.bind_all("<Control-n>", lambda e: self._new_animation())
         self.root.bind_all("<Control-z>", lambda e: self._undo())
+
+    # ── tutorial integration ─────────────────────────────────────────────────
+    def _build_tutorial_controller(self) -> None:
+        """Build the runner + controller AFTER widgets are registered."""
+        steps = steps_for(self._profile.age_preset)
+        runner = TutorialRunner(
+            self.events, steps, self._tutorial_state,
+            save_callback=save_state,
+        )
+        self._tutorial_controller = TutorialController(
+            self.root, self.widget_registry, runner, self._profile,
+        )
+
+    def _start_tutorial(self) -> None:
+        """Auto-start path on fresh installs."""
+        if self._tutorial_controller is not None:
+            self._tutorial_controller.start()
+
+    def _replay_tutorial(self) -> None:
+        """User asked for the walk-through again from the top."""
+        if self._tutorial_controller is not None:
+            self._tutorial_controller.replay()
 
     def _on_key(self, event: tk.Event) -> None:  # type: ignore[type-arg]
         try:
